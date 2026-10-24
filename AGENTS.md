@@ -48,6 +48,9 @@ package manager, dev server, linter or test command — don't add one to "fix" t
 - The `/spec` skill lives in `.agents/skills/spec/` and is installed from `klerith/fernando-skills`
   (recorded in `skills-lock.json`). Its `template.md` defines the required spec shape. Don't
   hand-edit that skill: the lockfile hash would no longer match.
-- Specs go to `specs/NN-slug.md`. `specs/` does not exist yet, so the first one is `01-`. New specs
-  start as `Draft`; only the user promotes them to `Approved`.
-- The skill refers to `/spec-impl`, which is **not** installed in this repo — implementation is manual.
+- Specs go to `specs/NN-slug.md`, numbered `01-`, `02-`, ... and written **in Spanish**. New specs
+  start as `Borrador`; only the user promotes them to `Aprobado`.
+- `/spec-impl` also lives in `.agents/skills/spec-impl/` (same source, recorded in `skills-lock.json`).
+  It only runs on specs whose state means "Approved"/"Aprobado", and it creates the branch
+  `spec-NN-slug` (controlled by `AutoCreateBranch` in `specs/.spec-config.yml`, default `true`).
+  It pauses after every plan step and never commits on its own. Don't hand-edit these skills.

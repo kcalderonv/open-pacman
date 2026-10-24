@@ -13,6 +13,9 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 const GHOST_SPEED = 0.1;    // 1/10 celda/frame
 
+// Retardos de salida de la pen, en frames jugados (spec 01).
+const RELEASE_FRAMES = { blinky: 0, pinky: 45, inky: 90, clyde: 135 };
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -28,6 +31,7 @@ function createGame() {
     score: 0,
     lives: 3,
     dotsRemaining: dots,
+    frame: 0, // frames jugados; gobierna la salida escalonada de la pen
     grid,
     pacman: {
       x: PACMAN_START.x,
@@ -110,9 +114,145 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
+// Celda objetivo segun la personalidad del fantasma (spec 01).
+// Devuelve celdas sin recortar: rosa y cian pueden apuntar fuera del laberinto.
+function ghostTarget( game, g ) {
+  const p = game.pacman;
+  const px = Math.round( p.x );
+  const py = Math.round( p.y );
+  const pd = DIRS[ p.dir ] || { x: 0, y: 0 };
+
+  if ( g.kind === 'pinky' ) {
+    // 4 celdas por delante de la direccion actual de Pac-Man.
+    return { x: px + pd.x * 4, y: py + pd.y * 4 };
+  }
+
+  if ( g.kind === 'inky' ) {
+    // 2 * (2 celdas por delante de Pac-Man) - posicion de Blinky.
+    const blinky = game.ghosts.find( ( o ) => o.kind === 'blinky' );
+    const bx = blinky ? Math.round( blinky.x ) : px;
+    const by = blinky ? Math.round( blinky.y ) : py;
+    return { x: 2 * ( px + pd.x * 2 ) - bx, y: 2 * ( py + pd.y * 2 ) - by };
+  }
+
+  if ( g.kind === 'clyde' ) {
+    // Persigue de lejos; a 8 celdas o menos se retira a su esquina.
+    const dist = Math.abs( Math.round( g.x ) - px ) + Math.abs( Math.round( g.y ) - py );
+    if ( dist > 8 ) return { x: px, y: py };
+    return { x: 1, y: 29 };
+  }
+
+  // blinky (y cualquier kind desconocido): la celda de Pac-Man.
+  return { x: px, y: py };
+}
+
+// Recorta una celda a los limites de la rejilla.
+function clampToGrid( grid, cell ) {
+  return {
+    x: Math.max( 0, Math.min( grid[ 0 ].length - 1, Math.round( cell.x ) ) ),
+    y: Math.max( 0, Math.min( grid.length - 1, Math.round( cell.y ) ) ),
+  };
+}
+
+// Si el objetivo cae sobre una pared (el recorte puede dejarlo en el borde),
+// se usa la celda transitable mas cercana en Manhattan. Sin esto el BFS no lo
+// alcanza y el desempate greedy puede encerrar al fantasma en la pen.
+function snapToOpen( grid, cell ) {
+  const H = grid.length;
+  const W = grid[ 0 ].length;
+  if ( grid[ cell.y ][ cell.x ] !== 1 ) return cell;
+
+  let best = cell;
+  let bestDist = Infinity;
+  for ( let y = 0; y < H; y++ ) {
+    for ( let x = 0; x < W; x++ ) {
+      if ( grid[ y ][ x ] === 1 ) continue;
+      const d = Math.abs( x - cell.x ) + Math.abs( y - cell.y );
+      if ( d < bestDist ) {
+        bestDist = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
+}
+
+// Distancias BFS, en celdas, desde 'to' hasta cada celda transitable para
+// fantasmas: todo lo que no sea pared (1); la puerta de la pen (3) cuenta.
+// No conecta los extremos del tunel (spec 01). Infinity = inalcanzable.
+function bfsDistances( grid, to ) {
+  const H = grid.length;
+  const W = grid[ 0 ].length;
+  const dist = grid.map( ( row ) => row.map( () => Infinity ) );
+
+  if ( to.x < 0 || to.x >= W || to.y < 0 || to.y >= H ) return dist;
+  if ( grid[ to.y ][ to.x ] === 1 ) return dist;
+
+  const queue = [ [ to.x, to.y ] ];
+  dist[ to.y ][ to.x ] = 0;
+  for ( let i = 0; i < queue.length; i++ ) {
+    const x = queue[ i ][ 0 ];
+    const y = queue[ i ][ 1 ];
+    for ( const dir of Object.keys( DIRS ) ) {
+      const d = DIRS[ dir ];
+      const nx = x + d.x;
+      const ny = y + d.y;
+      if ( nx < 0 || nx >= W || ny < 0 || ny >= H ) continue;
+      if ( grid[ ny ][ nx ] === 1 ) continue;
+      if ( dist[ ny ][ nx ] !== Infinity ) continue;
+      dist[ ny ][ nx ] = dist[ y ][ x ] + 1;
+      queue.push( [ nx, ny ] );
+    }
+  }
+  return dist;
+}
+
+// Primer paso de la ruta mas corta desde 'from' hacia 'to', limitado a
+// 'options'. Devuelve null si el objetivo no es alcanzable, para que el
+// llamador caiga al desempate Manhattan.
+function firstStepToward( grid, from, to, options ) {
+  const W = grid[ 0 ].length;
+  const H = grid.length;
+  const dist = bfsDistances( grid, to );
+
+  let best = null;
+  let bestDist = Infinity;
+  for ( const dir of options ) {
+    const d = DIRS[ dir ];
+    const nx = Math.round( from.x ) + d.x;
+    const ny = Math.round( from.y ) + d.y;
+    // Fuera de la rejilla: solo puede ser el tunel, que el BFS no modela.
+    if ( nx < 0 || nx >= W || ny < 0 || ny >= H ) continue;
+    const nd = dist[ ny ][ nx ];
+    if ( nd < bestDist ) {
+      bestDist = nd;
+      best = dir;
+    }
+  }
+  if ( best === null || bestDist === Infinity ) return null;
+  return best;
+}
+
+// Desempate clasico por distancia Manhattan, para cuando el BFS no alcanza
+// el objetivo (objetivo sobre una pared o en zona aislada).
+function greedyStep( from, to, options ) {
+  let best = options[ 0 ];
+  let bestDist = Infinity;
+  for ( const dir of options ) {
+    const d = DIRS[ dir ];
+    const nx = from.x + d.x;
+    const ny = from.y + d.y;
+    const dist = Math.abs( nx - to.x ) + Math.abs( ny - to.y );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
+    }
+  }
+  return best;
+}
+
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
 
   const options = Object.keys( DIRS ).filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
@@ -120,30 +260,17 @@ function decideGhost( game, g ) {
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
-    }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
-  }
+  const target = snapToOpen( grid, clampToGrid( grid, ghostTarget( game, g ) ) );
+  const step = firstStepToward( grid, g, target, choices );
+  g.dir = step || greedyStep( g, target, choices );
 }
 
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
+
+  // Salida escalonada: cada fantasma espera su turno en la pen.
+  if ( game.frame < RELEASE_FRAMES[ g.kind ] ) return;
 
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
@@ -176,6 +303,7 @@ function collides( a, b ) {
 }
 
 function update( game ) {
+  game.frame++;
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 

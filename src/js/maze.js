@@ -51,9 +51,12 @@ const MAZE = MAZE_STR.map( ( row ) => row.split( '' ).map( parseTile ) );
 
 const TUNNEL_ROW = 14;
 const PACMAN_START = { x: 13, y: 23 };
+// Un fantasma por personalidad (spec 01). El orden es el indice de color en render.js.
 const GHOST_STARTS = [
-  { x: 13, y: 14, kind: 'hunter' }, // dentro de la pen
-  { x: 14, y: 14, kind: 'random' }, // dentro de la pen
+  { x: 13, y: 13, kind: 'blinky' }, // bajo la puerta, sale primero
+  { x: 14, y: 13, kind: 'pinky'  },
+  { x: 13, y: 15, kind: 'inky'   },
+  { x: 14, y: 15, kind: 'clyde'  },
 ];
 
 window.MAZE = MAZE;
