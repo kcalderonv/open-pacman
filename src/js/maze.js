@@ -59,7 +59,17 @@ const GHOST_STARTS = [
   { x: 14, y: 15, kind: 'clyde'  },
 ];
 
+// Celda exterior donde aparece cada fantasma al cumplir su retardo (spec 02).
+// Fila 11, justo encima de la puerta de la pen; una celda distinta por kind.
+const GHOST_EXITS = {
+  blinky: { x: 13, y: 11 }, // justo encima de la puerta
+  pinky:  { x: 14, y: 11 },
+  inky:   { x: 12, y: 11 },
+  clyde:  { x: 15, y: 11 },
+};
+
 window.MAZE = MAZE;
 window.TUNNEL_ROW = TUNNEL_ROW;
 window.PACMAN_START = PACMAN_START;
 window.GHOST_STARTS = GHOST_STARTS;
+window.GHOST_EXITS = GHOST_EXITS;

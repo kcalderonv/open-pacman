@@ -1,6 +1,6 @@
 // game.js
 // Estado y reglas. Depende de globals de maze.js: MAZE, TUNNEL_ROW,
-// PACMAN_START, GHOST_STARTS.
+// PACMAN_START, GHOST_STARTS, GHOST_EXITS.
 
 const DIRS = {
   left: { x: -1, y: 0 },
@@ -46,6 +46,7 @@ function createGame() {
       dir: 'up',
       speed: GHOST_SPEED,
       kind: g.kind,
+      released: false, // aun espera su turno dentro de la jaula (spec 02)
     } ) ),
   };
 }
@@ -269,8 +270,16 @@ function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
-  // Salida escalonada: cada fantasma espera su turno en la pen.
-  if ( game.frame < RELEASE_FRAMES[ g.kind ] ) return;
+  // Salida escalonada: cada fantasma espera su turno en la jaula y, al cumplirlo,
+  // se materializa en su celda exterior y sigue moviendose en esta misma llamada.
+  if ( !g.released ) {
+    if ( game.frame < RELEASE_FRAMES[ g.kind ] ) return;
+    const exit = GHOST_EXITS[ g.kind ];
+    g.x = exit.x;
+    g.y = exit.y;
+    g.dir = 'up';
+    g.released = true;
+  }
 
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
@@ -291,10 +300,14 @@ function resetPositions( game ) {
   p.y = PACMAN_START.y;
   p.dir = 'left';
   p.nextDir = null;
-  game.ghosts.forEach( ( g, i ) => {
-    g.x = GHOST_STARTS[ i ].x;
-    g.y = GHOST_STARTS[ i ].y;
+  // Tras perder una vida los cuatro reaparecen ya en el mapa, en su celda de
+  // salida y sin volver a esperar turno en la jaula (spec 02).
+  game.ghosts.forEach( ( g ) => {
+    const exit = GHOST_EXITS[ g.kind ];
+    g.x = exit.x;
+    g.y = exit.y;
     g.dir = 'up';
+    g.released = true;
   } );
 }
 
