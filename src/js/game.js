@@ -16,6 +16,12 @@ const GHOST_SPEED = 0.1;    // 1/10 celda/frame
 // Retardos de salida de la pen, en frames jugados (spec 01).
 const RELEASE_FRAMES = { blinky: 0, pinky: 45, inky: 90, clyde: 135 };
 
+// Modo asustado (spec 03), en frames fijos a 60 Hz.
+const FRIGHT_FRAMES = 360;        // 6 s
+const FRIGHT_BLINK_FRAMES = 120;  // ultimos 2 s: parpadeo de aviso
+const POWER_PELLET_SCORE = 50;
+const GHOST_SCORES = [ 200, 400, 800, 1600 ];
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -24,7 +30,7 @@ function createGame() {
   grid[ PACMAN_START.y ][ PACMAN_START.x ] = 0;
 
   let dots = 0;
-  for ( const row of grid ) for ( const v of row ) if ( v === 2 ) dots++;
+  for ( const row of grid ) for ( const v of row ) if ( v === 2 || v === 4 ) dots++;
 
   return {
     state: 'start',
@@ -32,6 +38,8 @@ function createGame() {
     lives: 3,
     dotsRemaining: dots,
     frame: 0, // frames jugados; gobierna la salida escalonada de la pen
+    frightFrames: 0, // frames de susto restantes; 0 = sin susto (spec 03)
+    ghostsEaten: 0,  // cadena del pellet actual; se reinicia con cada pellet
     grid,
     pacman: {
       x: PACMAN_START.x,
@@ -47,8 +55,19 @@ function createGame() {
       speed: GHOST_SPEED,
       kind: g.kind,
       released: false, // aun espera su turno dentro de la jaula (spec 02)
+      eaten: false,    // comido durante el susto; espera fuera del mapa (spec 03)
     } ) ),
   };
+}
+
+// Empieza el modo asustado (spec 03): reinicia la cadena de puntos e invierte
+// en el sitio la direccion de los fantasmas que estan en el mapa.
+function startFright( game ) {
+  game.frightFrames = FRIGHT_FRAMES;
+  game.ghostsEaten = 0;
+  game.ghosts.forEach( ( g ) => {
+    if ( g.released && !g.eaten ) g.dir = OPPOSITE[ g.dir ];
+  } );
 }
 
 function aligned( v ) {
@@ -105,6 +124,13 @@ function movePacman( game ) {
       game.score += 10;
       game.dotsRemaining--;
     }
+    // Comer power pellet: 50 puntos y arranca el susto (spec 03).
+    if ( grid[ p.y ][ p.x ] === 4 ) {
+      grid[ p.y ][ p.x ] = 0;
+      game.score += POWER_PELLET_SCORE;
+      game.dotsRemaining--;
+      startFright( game );
+    }
     // Si no puede seguir, se detiene en la celda.
     if ( !canMove( grid, p.x, p.y, p.dir, 'pacman' ) ) return;
   }
@@ -122,6 +148,11 @@ function ghostTarget( game, g ) {
   const px = Math.round( p.x );
   const py = Math.round( p.y );
   const pd = DIRS[ p.dir ] || { x: 0, y: 0 };
+
+  // Durante el susto la huida manda: la celda transitable mas lejana (spec 03).
+  if ( game.frightFrames > 0 ) {
+    return farthestOpenCell( game.grid, { x: px, y: py } );
+  }
 
   if ( g.kind === 'pinky' ) {
     // 4 celdas por delante de la direccion actual de Pac-Man.
@@ -208,6 +239,25 @@ function bfsDistances( grid, to ) {
   return dist;
 }
 
+// Celda transitable alcanzable mas lejana (en celdas BFS) desde 'from'.
+// Desempata por el primer hallazgo en orden de fila (y) y luego columna (x),
+// para que la huida sea determinista (spec 03).
+function farthestOpenCell( grid, from ) {
+  const dist = bfsDistances( grid, from );
+  let best = { x: from.x, y: from.y };
+  let bestDist = -1;
+  for ( let y = 0; y < grid.length; y++ ) {
+    for ( let x = 0; x < grid[ 0 ].length; x++ ) {
+      if ( dist[ y ][ x ] === Infinity ) continue;
+      if ( dist[ y ][ x ] > bestDist ) {
+        bestDist = dist[ y ][ x ];
+        best = { x, y };
+      }
+    }
+  }
+  return best;
+}
+
 // Primer paso de la ruta mas corta desde 'from' hacia 'to', limitado a
 // 'options'. Devuelve null si el objetivo no es alcanzable, para que el
 // llamador caiga al desempate Manhattan.
@@ -270,6 +320,9 @@ function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
 
+  // Comido: espera fuera del mapa hasta que termine el susto (spec 03).
+  if ( g.eaten ) return;
+
   // Salida escalonada: cada fantasma espera su turno en la jaula y, al cumplirlo,
   // se materializa en su celda exterior y sigue moviendose en esta misma llamada.
   if ( !g.released ) {
@@ -302,12 +355,16 @@ function resetPositions( game ) {
   p.nextDir = null;
   // Tras perder una vida los cuatro reaparecen ya en el mapa, en su celda de
   // salida y sin volver a esperar turno en la jaula (spec 02).
+  // El susto termina y la cadena de puntos vuelve a 0 (spec 03).
+  game.frightFrames = 0;
+  game.ghostsEaten = 0;
   game.ghosts.forEach( ( g ) => {
     const exit = GHOST_EXITS[ g.kind ];
     g.x = exit.x;
     g.y = exit.y;
     g.dir = 'up';
     g.released = true;
+    g.eaten = false;
   } );
 }
 
@@ -317,19 +374,52 @@ function collides( a, b ) {
 
 function update( game ) {
   game.frame++;
+
+  // Cuenta atras del susto (spec 03). Al llegar a 0, los comidos reaparecen en
+  // su celda de salida y vuelven a su color y reglas normales.
+  if ( game.frightFrames > 0 ) {
+    game.frightFrames--;
+    if ( game.frightFrames === 0 ) {
+      game.ghosts.forEach( ( g ) => {
+        if ( !g.eaten ) return;
+        const exit = GHOST_EXITS[ g.kind ];
+        g.x = exit.x;
+        g.y = exit.y;
+        g.dir = 'up';
+        g.eaten = false;
+        g.released = true;
+      } );
+    }
+  }
+
   movePacman( game );
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
   for ( const g of game.ghosts ) {
-    if ( collides( game.pacman, g ) ) {
-      game.lives--;
-      if ( game.lives <= 0 ) {
-        game.state = 'lost';
-        return;
-      }
-      resetPositions( game );
-      break;
+    if ( g.eaten ) continue;
+    if ( !collides( game.pacman, g ) ) continue;
+
+    // Durante el susto el fantasma es comestible: cadena 200/400/800/1600 y
+    // vuelve a la pen sin costar vida (spec 03).
+    if ( game.frightFrames > 0 ) {
+      game.score += GHOST_SCORES[ game.ghostsEaten ];
+      game.ghostsEaten++;
+      const start = GHOST_STARTS.find( ( s ) => s.kind === g.kind );
+      g.x = start.x;
+      g.y = start.y;
+      g.dir = 'up';
+      g.eaten = true;
+      g.released = false;
+      continue;
     }
+
+    game.lives--;
+    if ( game.lives <= 0 ) {
+      game.state = 'lost';
+      return;
+    }
+    resetPositions( game );
+    break;
   }
 
   if ( game.dotsRemaining <= 0 ) game.state = 'won';

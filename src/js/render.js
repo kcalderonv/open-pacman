@@ -5,6 +5,8 @@ const TILE = 20;
 const WALL_COLOR = '#2121ff';
 const DOOR_COLOR = '#ffb8ff';
 const DOT_COLOR = '#ffb897';
+const FRIGHT_COLOR = '#2121de';
+const FRIGHT_BLINK_COLOR = '#ffffff';
 
 function cellCenter( x, y ) {
   return { cx: x * TILE + TILE / 2, cy: y * TILE + TILE / 2 };
@@ -70,10 +72,12 @@ function drawDots( ctx, grid ) {
   ctx.fillStyle = DOT_COLOR;
   for ( let y = 0; y < grid.length; y++ ) {
     for ( let x = 0; x < grid[ 0 ].length; x++ ) {
-      if ( grid[ y ][ x ] !== 2 ) continue;
+      const v = grid[ y ][ x ];
+      if ( v !== 2 && v !== 4 ) continue;
       const { cx, cy } = cellCenter( x, y );
       ctx.beginPath();
-      ctx.arc( cx, cy, 2.5, 0, Math.PI * 2 );
+      // Power pellet (4): mismo color y radio mayor que un dot normal.
+      ctx.arc( cx, cy, v === 4 ? 5.5 : 2.5, 0, Math.PI * 2 );
       ctx.fill();
     }
   }
@@ -98,7 +102,7 @@ function drawPacman( ctx, p, frame ) {
   ctx.fill();
 }
 
-function drawGhost( ctx, g, color ) {
+function drawGhost( ctx, g, color, frightened, blinking ) {
   const { cx, cy } = cellCenter( g.x, g.y );
   const r = TILE / 2 - 1;
   const top = cy - r;
@@ -106,7 +110,9 @@ function drawGhost( ctx, g, color ) {
   const left = cx - r;
   const right = cx + r;
 
-  ctx.fillStyle = color;
+  ctx.fillStyle = frightened
+    ? ( blinking ? FRIGHT_BLINK_COLOR : FRIGHT_COLOR )
+    : color;
   ctx.beginPath();
   ctx.arc( cx, cy - 1, r, Math.PI, 0, false ); // cabeza
   ctx.lineTo( right, bottom );
@@ -159,7 +165,19 @@ function draw( ctx, game, frame ) {
   drawDoor( ctx, grid );
   drawDots( ctx, grid );
   drawPacman( ctx, game.pacman, frame );
-  game.ghosts.forEach( ( g, i ) => drawGhost( ctx, g, GHOST_COLORS[ i ] || '#ff0000' ) );
+
+  // Susto (spec 03): azul fijo y parpadeo blanco en los ultimos 120 frames.
+  // El comido no se dibuja hasta que reaparezca al terminar el susto.
+  const frightened = game.frightFrames > 0;
+  const blinking =
+    frightened &&
+    game.frightFrames <= FRIGHT_BLINK_FRAMES &&
+    Math.floor( game.frightFrames / 15 ) % 2 === 0;
+
+  game.ghosts.forEach( ( g, i ) => {
+    if ( g.eaten ) return;
+    drawGhost( ctx, g, GHOST_COLORS[ i ] || '#ff0000', frightened, blinking );
+  } );
   drawHUD( ctx, game, W );
 }
 
