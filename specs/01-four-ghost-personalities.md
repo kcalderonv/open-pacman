@@ -59,22 +59,22 @@ Convenciones que se mantienen: coordenadas en celdas con origen arriba-izquierda
    ```
 
    Se conservan la regla de no girar 180° y el fallback de callejón. Manual: cada fantasma toma un camino distinto y visiblemente reconocible.
-5. `game.js`: añadir `firstStepToward( grid, from, to )` con BFS y usarlo en lugar del desempate Manhattan. Nodos transitables para fantasmas = todo lo que no sea `1` (la puerta sigue siendo transitable). Si el objetivo cae fuera de la rejilla o sobre una pared, se recorta a los límites y, si sigue sin ser alcanzable, se cae a Manhattan greedy. Manual: el rojo deja de oscilar y llega a Pac-Man.
+5. `game.js`: añadir `firstStepToward( grid, from, to )` con BFS y usarlo en lugar del desempate Manhattan. Nodos transitables para fantasmas = todo lo que no sea `1` (la puerta sigue siendo transitable). Si el objetivo cae fuera de la rejilla se recorta a los límites; si el objetivo —recortado o no— cae sobre una pared, se usa la celda transitable más cercana en Manhattan. Si aun así no es alcanzable, se cae a Manhattan greedy. Manual: el rojo deja de oscilar y llega a Pac-Man.
 6. Pasada de verificación contra los criterios de aceptación.
 
 ## Criterios de aceptación
 
-- [ ] Al pulsar Start aparecen cuatro fantasmas con colores distintos: rojo, rosa, cian, naranja.
-- [ ] Los cuatro empiezan en (13,13), (14,13), (13,15) y (14,15), dentro de la pen.
-- [ ] Salen de la pen en ese orden, con unos 45 frames entre uno y el siguiente y sin amontonarse.
-- [ ] Sin tocar el teclado desde Start, el fantasma rojo llega a Pac-Man y se pierde una vida en menos de 15 segundos.
-- [ ] El rojo no se queda oscilando entre dos celdas ni parado contra una pared en 60 segundos de partida.
-- [ ] Con Pac-Man moviéndose a la derecha por la fila 23, el objetivo del rosa es `(x + 4, 23)`.
-- [ ] Mover al rojo de sitio cambia la decisión del cian en la misma situación de Pac-Man.
-- [ ] El naranja persigue cuando está a más de 8 celdas y se aleja hacia (1,29) cuando está a 8 o menos.
-- [ ] Ningún fantasma atraviesa una celda de pared (valor 1) y los cuatro usan el túnel de la fila 14.
-- [ ] Puntuación, vidas, dots restantes y estados `won`/`lost` funcionan igual que antes.
-- [ ] La consola del navegador queda sin errores.
+- [x] Al pulsar Start aparecen cuatro fantasmas con colores distintos: rojo, rosa, cian, naranja.
+- [x] Los cuatro empiezan en (13,13), (14,13), (13,15) y (14,15), dentro de la pen.
+- [x] Salen de la pen en ese orden, con unos 45 frames entre uno y el siguiente y sin amontonarse.
+- [x] Sin tocar el teclado desde Start, el fantasma rojo llega a Pac-Man y se pierde una vida en menos de 15 segundos.
+- [x] El rojo no se queda oscilando entre dos celdas ni parado contra una pared en 60 segundos de partida.
+- [x] Con Pac-Man moviéndose a la derecha por la fila 23, el objetivo del rosa es `(x + 4, 23)`.
+- [x] Mover al rojo de sitio cambia la decisión del cian en la misma situación de Pac-Man.
+- [x] El naranja persigue cuando está a más de 8 celdas y se aleja hacia (1,29) cuando está a 8 o menos.
+- [x] Ningún fantasma atraviesa una celda de pared (valor 1) y los cuatro usan el túnel de la fila 14.
+- [x] Puntuación, vidas, dots restantes y estados `won`/`lost` funcionan igual que antes.
+- [x] La consola del navegador queda sin errores.
 
 ## Decisiones
 
@@ -82,6 +82,7 @@ Convenciones que se mantienen: coordenadas en celdas con origen arriba-izquierda
 - **Sí:** BFS para los cuatro, no solo para el cazador. Un solo algoritmo y cuatro objetivos distintos producen cuatro comportamientos; duplicar la lógica de decisión sería más código para el mismo resultado.
 - **No:** Manhattan greedy como decisión principal. Es lo que hay hoy y se queda oscilando en forma de U, justo lo que "perseguir decididamente" pide evitar.
 - **No:** A\*. Con 868 celdas y cuatro fantasmas el coste es irrelevante y la heurística solo añadiría código que mantener.
+- **Sí:** pegar el objetivo a la celda transitable más cercana cuando cae sobre una pared. Sin esto el BFS no lo alcanza, entra el fallback greedy y el cian se queda dando vueltas dentro de la pen sin salir nunca.
 - **No:** alternancia scatter/chase. Se elige persecución permanente para que cada personalidad sea predecible y verificable.
 - **Sí:** retardos de salida en frames y solo al empezar la partida. Tras perder una vida se recolocan y salen sin esperar, igual que el resto del juego evita acumular estado.
 - **No:** bloquear la reentrada a la pen. `isWall` se queda como está; el BFS saca a los fantasmas igual.
@@ -93,7 +94,7 @@ Convenciones que se mantienen: coordenadas en celdas con origen arriba-izquierda
 
 | Riesgo | Mitigación |
 | --- | --- |
-| El objetivo del rosa o del cian cae fuera del laberinto o sobre una pared | Recorte a los límites de la rejilla y desempate Manhattan si el BFS no lo alcanza |
+| El objetivo del rosa o del cian cae fuera del laberinto o sobre una pared | Recorte a los límites, pegado a la celda transitable más cercana y desempate Manhattan si el BFS no lo alcanza |
 | BFS recalculado en cada frame alineado para cada fantasma | 868 celdas como máximo, solo al alinearse; si molesta, cachear por par (origen, objetivo) |
 | Los cuatro se amontonan al salir | Retardos 0/45/90/135 y dos columnas de salida distintas |
 | Sin delta-time, los retardos dependen de la tasa de refresco | Se expresan en frames; a 144 Hz salen ~2,4× más rápido, coherente con el resto del juego |
